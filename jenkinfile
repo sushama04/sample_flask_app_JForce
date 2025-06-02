@@ -1,0 +1,82 @@
+pipeline {
+    agent any
+
+    tools {
+        jdk 'jdk17' // Optional for Python, but kept if Sonar requires it
+    }
+
+    environment {
+        //SCANNER_HOME = tool 'sonar-scanner'
+        IMAGE_NAME = 'sushama07/flask-app'
+        VERSION = "${BUILD_NUMBER}"
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                git branch: 'main', credentialsId: 'git-cred', url: 'https://github.com/sushama04/sample_flask_app_JForce.git'
+            }
+        }
+
+        // stage('SonarQube Analysis') {
+        //     steps {
+        //         withSonarQubeEnv('sonar-server') {
+        //             sh '''$SCANNER_HOME/bin/sonar-scanner \
+        //                   -Dsonar.projectKey=flask-app \
+        //                   -Dsonar.projectName=flask-app \
+        //                   -Dsonar.sources=.'''
+        //         }
+        //     }
+        // }
+
+        stage('Docker Build') {
+            steps {
+                script {
+                    def versionTag = "${env.IMAGE_NAME}:${env.VERSION}"
+                    def latestTag = "${env.IMAGE_NAME}:latest"
+                    withDockerRegistry(credentialsId: 'docker-cred') {
+                        sh "docker build -t ${versionTag} -t ${latestTag} ."
+                    }
+                }
+            }
+        }
+
+        stage('Trivy Image Scan') {
+            steps {
+                sh "trivy image --format table -o image.html ${IMAGE_NAME}:${VERSION}"
+            }
+        }
+
+        stage('Docker Push') {
+            steps {
+                script {
+                    def versionTag = "${env.IMAGE_NAME}:${env.VERSION}"
+                    def latestTag = "${env.IMAGE_NAME}:latest"
+                    withDockerRegistry(credentialsId: 'docker-cred') {
+                        sh "docker push ${versionTag}"
+                        sh "docker push ${latestTag}"
+                    }
+                }
+            }
+        }
+        stage('K8-deploy') {
+            steps {
+                withKubeConfig(caCertificate: '', clusterName: ' devopsshack-cluster', contextName: '', credentialsId: 'k8-cred', namespace: 'webapps', restrictKubeConfigAccess: false, serverUrl: 'https://68833DABE6F985C3680E3C8711AF1532.yl4.ap-south-1.eks.amazonaws.com') {
+                        sh "kubectl apply -f deployment-service.yml"
+                        sleep 20
+                }
+            }
+        }
+        stage('K8-verify') {
+            steps {
+                withKubeConfig(caCertificate: '', clusterName: ' devopsshack-cluster', contextName: '', credentialsId: 'k8-cred', namespace: 'webapps', restrictKubeConfigAccess: false, serverUrl: 'https://68833DABE6F985C3680E3C8711AF1532.yl4.ap-south-1.eks.amazonaws.com') {
+                        sh "kubectl get pods"
+                        sh "kubectl get svc"
+                        
+                }
+            }
+        }
+        
+        
+    }
+}
